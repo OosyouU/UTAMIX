@@ -579,11 +579,12 @@ function removePlayer(pid) {
   document.getElementById(`strip-${pid}`)?.remove();
   const i = S.players.findIndex(x => x.pid === pid);
   if (i !== -1) S.players.splice(i, 1);
-  if (S.soloTrack === pid) { S.soloTrack = null; applyMuteState(); }
+  // soloTrack が削除されたなら解除、そうでなくても常に音量を再適用
+  if (S.soloTrack === pid) S.soloTrack = null;
+  applyMuteState();   // ← 削除後に残ったプレイヤーの音量を必ず再設定
   if (!S.players.length) document.getElementById('players-grid').innerHTML = EMPTY_HTML;
   updateMasterDuration();
   S.players.forEach((p, idx) => {
-    document.getElementById(`badge-${p.pid}`)?.setAttribute('data-txt', `CH ${idx+1}`);
     const b = document.getElementById(`badge-${p.pid}`); if (b) b.textContent = `CH ${idx+1}`;
     const h = document.getElementById(`head-${p.pid}`);  if (h) h.textContent  = `CH ${idx+1}`;
   });
