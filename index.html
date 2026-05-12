@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UTAMIX</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:      #07070f;
+  --bg2:     #0d0d1c;
+  --bg3:     #13132a;
+  --border:  rgba(255,255,255,0.10);
+  --accent:  #e8ff47;
+  --accent2: #47d4ff;
+  --red:     #ff4770;
+  --text:    #f0f0ff;
+  --muted:   rgba(255,255,255,0.62);
+  --dim:     rgba(255,255,255,0.14);
+  --h-header: 64px;
+  --h-seek:   44px;
+  --h-mixer:  212px;
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:'Syne',sans-serif; }
+body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.025'/%3E%3C/svg%3E"); opacity:.4; }
+
+#app { display:flex; flex-direction:column; height:100%; }
+
+#header {
+  flex-shrink:0; height:var(--h-header);
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between; padding:0 16px; gap:10px;
+}
+
+#players-area { flex:1; overflow:hidden; min-height:0; position:relative; }
+
+/* ── Drop overlay (URL drop to add) ── */
+#drop-overlay {
+  display:none; position:absolute; inset:0; z-index:60;
+  background:rgba(7,7,15,.86); border:3px dashed var(--accent); border-radius:10px;
+  align-items:center; justify-content:center; flex-direction:column; gap:10px;
+  pointer-events:none;
+}
+#drop-overlay.show { display:flex; }
+#drop-overlay .drop-title { font-family:'Bebas Neue',sans-serif; font-size:30px; letter-spacing:.18em; color:var(--accent); }
+#drop-overlay .drop-sub   { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); }
+
+/* ── Mixer ── */
+#mixer-shell { flex-shrink:0; background:var(--bg2); border-top:1px solid var(--border); display:flex; flex-direction:column; }
+#seek-row {
+  flex-shrink:0; height:var(--h-seek); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:10px; padding:0 14px;
+}
+#fader-row { height:var(--h-mixer); display:flex; overflow:hidden; }
+
+/* ── Grid ── */
+#players-grid {
+  display:grid; width:100%; height:100%; background:var(--bg);
+  justify-content:center; align-content:center;
+}
+#empty-state {
+  grid-column:1/-1; grid-row:1/-1;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+}
+
+/* ── Player card ── */
+.pcard {
+  position:relative; background:#09090f;
+  border-radius:6px; overflow:hidden; border:1px solid var(--border);
+  transition:box-shadow .15s, opacity .2s;
+}
+/* iframe always blocks pointer so drag-handle overlay works */
+.pcard iframe { width:100%; height:100%; border:none; display:block; }
+
+/* Ghost drag: removed */
+
+/* ── Drag handle: removed ── */
+
+.ch-badge {
+  position:absolute; top:6px; left:6px; pointer-events:none; z-index:11;
+  background:rgba(8,8,16,.88); color:var(--accent);
+  font-family:'JetBrains Mono',monospace; font-size:11px;
+  padding:2px 9px; border-radius:20px; letter-spacing:.1em;
+}
+.rm-btn {
+  position:absolute; top:6px; right:6px; z-index:12; cursor:pointer;
+  width:24px; height:24px; border-radius:4px;
+  background:rgba(8,8,16,.88); color:var(--muted);
+  border:1px solid var(--border); font-size:12px;
+  display:flex; align-items:center; justify-content:center; transition:color .15s;
+}
+.rm-btn:hover { color:var(--red); }
+
+/* ── Drag ghost (floating clone) ── */
+#drag-ghost {
+  position:fixed; pointer-events:none; z-index:9000;
+  border-radius:6px; overflow:hidden; border:2px solid var(--accent);
+  box-shadow:0 8px 32px rgba(0,0,0,.7);
+  opacity:.85; display:none;
+  background:#09090f;
+}
+
+/* ── Transport ── */
+.t-btn {
+  display:flex; align-items:center; gap:4px; padding:6px 14px; border-radius:5px;
+  font-size:12px; font-family:'JetBrains Mono',monospace; cursor:pointer;
+  border:1px solid var(--border); background:transparent; color:var(--muted);
+  transition:all .15s; white-space:nowrap; flex-shrink:0;
+}
+.t-btn:hover { color:var(--text); border-color:var(--dim); }
+.t-btn.play  { background:rgba(232,255,71,.12); color:var(--accent); border-color:rgba(232,255,71,.4); }
+.t-btn.play:hover { background:rgba(232,255,71,.22); }
+.t-btn.playing { background:rgba(71,212,255,.12); color:var(--accent2); border-color:rgba(71,212,255,.4); }
+
+.btn-sm {
+  background:transparent; color:var(--muted); border:1px solid var(--border);
+  padding:5px 10px; border-radius:5px; font-size:11px; cursor:pointer;
+  flex-shrink:0; transition:all .15s;
+  font-family:'JetBrains Mono',monospace; white-space:nowrap;
+}
+.btn-sm:hover { color:var(--text); border-color:var(--dim); }
+
+/* ── Seek ── */
+.seek-wrap { flex:1; display:flex; align-items:center; gap:8px; min-width:0; }
+.time-lbl { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); white-space:nowrap; flex-shrink:0; }
+input[type=range] { -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer; flex:1; min-width:0; }
+input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:2px; background:rgba(255,255,255,.18); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); margin-top:-6px; box-shadow:0 0 0 2px rgba(232,255,71,.4); }
+input[type=range]::-moz-range-track { height:4px; border-radius:2px; background:rgba(255,255,255,.18); }
+input[type=range]::-moz-range-thumb  { width:16px; height:16px; border-radius:50%; background:var(--accent); border:none; }
+
+/* ── Channel scroll ── */
+#ch-scroll {
+  display:flex; flex:1; overflow-x:auto;
+  scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.18) transparent;
+}
+#ch-scroll::-webkit-scrollbar { height:4px; }
+#ch-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,.22); border-radius:2px; }
+
+/* ── Strip ── */
+.strip {
+  display:flex; flex-direction:column; align-items:center;
+  width:116px; flex-shrink:0; border-right:1px solid var(--border);
+  padding:6px 8px 8px; overflow:visible; background:var(--bg2);
+}
+.strip-ch {
+  font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:500;
+  color:var(--text); letter-spacing:.12em; text-align:center;
+  flex-shrink:0; margin-bottom:4px; width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.fader-section {
+  display:flex; align-items:flex-end; justify-content:center;
+  gap:6px; width:100%; flex-shrink:0; height:110px; margin-bottom:5px;
+}
+.vu-col { display:flex; flex-direction:column; align-items:center; gap:2px; width:9px; height:100%; justify-content:flex-end; flex-shrink:0; }
+.vu-seg { width:8px; height:4px; border-radius:1px; transition:opacity .07s; }
+.vf-wrap { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; }
+.vf-label { font-family:'JetBrains Mono',monospace; font-size:8px; color:var(--muted); letter-spacing:.05em; }
+.vf-val   { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); font-weight:600; min-width:24px; text-align:center; }
+.vf-track {
+  position:relative; width:6px; height:80px;
+  background:rgba(255,255,255,.14); border-radius:3px; cursor:pointer; overflow:visible; flex-shrink:0;
+}
+.vf-fill { position:absolute; bottom:0; left:0; right:0; border-radius:3px; background:linear-gradient(to top, var(--accent), #b0d800); }
+.vf-thumb {
+  position:absolute; left:50%; transform:translateX(-50%);
+  width:24px; height:8px; background:#dde8ff; border-radius:4px; cursor:grab; z-index:10;
+  box-shadow:0 0 0 2px rgba(232,255,71,.65), 0 2px 8px rgba(0,0,0,.6); transition:background .1s;
+}
+.vf-thumb:hover { background:var(--accent); }
+.strip-btns { display:flex; gap:4px; justify-content:center; flex-shrink:0; margin-bottom:4px; }
+.s-btn {
+  font-size:9px; padding:4px 8px; border-radius:4px;
+  border:1px solid var(--border); background:transparent; color:var(--muted);
+  cursor:pointer; font-family:'JetBrains Mono',monospace; font-weight:600;
+  letter-spacing:.05em; transition:all .15s;
+}
+.s-btn:hover { color:var(--text); border-color:var(--dim); }
+.s-btn.solo-on { background:rgba(232,255,71,.22); color:var(--accent); border-color:rgba(232,255,71,.65); }
+.s-btn.mute-on { background:rgba(255,71,112,.22); color:var(--red);    border-color:rgba(255,71,112,.65); }
+.off-row { display:flex; align-items:center; gap:2px; flex-shrink:0; width:100%; margin-bottom:3px; }
+.off-adj {
+  font-family:'JetBrains Mono',monospace; font-size:9px; padding:2px 4px; border-radius:3px;
+  border:1px solid var(--border); background:var(--bg3); color:var(--muted);
+  cursor:pointer; flex-shrink:0; transition:all .15s;
+}
+.off-adj:hover { color:var(--text); background:rgba(255,255,255,.08); }
+.off-val { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent2); text-align:center; flex:1; white-space:nowrap; overflow:hidden; }
+.pos-disp { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); text-align:center; flex-shrink:0; }
+
+#master-strip { width:96px; flex-shrink:0; background:rgba(232,255,71,.04); border-right:2px solid rgba(232,255,71,.28); }
+#master-strip .strip-ch { color:var(--accent); letter-spacing:.18em; }
+
+@keyframes glowPulse { 0%,100%{box-shadow:0 0 5px 2px rgba(232,255,71,.15)} 50%{box-shadow:0 0 18px 5px rgba(232,255,71,.35)} }
+.glow-dot { animation:glowPulse 2.2s ease-in-out infinite; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.pcard-enter { animation:fadeUp .3s ease forwards; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- Header -->
+<div id="header">
+  <!-- Logo -->
+  <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
+    <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Outer glow ring -->
+      <circle cx="22" cy="22" r="21" stroke="#e8ff47" stroke-width="1.2" stroke-opacity="0.35"/>
+      <!-- Inner circle fill -->
+      <circle cx="22" cy="22" r="18" fill="#0d0d1c"/>
+      <!-- Waveform bars -->
+      <rect x="8"  y="18" width="3" height="8"  rx="1.5" fill="#e8ff47" opacity="0.5"/>
+      <rect x="13" y="14" width="3" height="16" rx="1.5" fill="#e8ff47" opacity="0.75"/>
+      <rect x="18" y="10" width="3" height="24" rx="1.5" fill="#e8ff47"/>
+      <rect x="23" y="14" width="3" height="16" rx="1.5" fill="#e8ff47" opacity="0.75"/>
+      <rect x="28" y="17" width="3" height="10" rx="1.5" fill="#e8ff47" opacity="0.55"/>
+      <rect x="33" y="20" width="3" height="4"  rx="1.5" fill="#e8ff47" opacity="0.35"/>
+    </svg>
+    <div style="display:flex;flex-direction:column;gap:1px">
+      <div style="display:flex;align-items:baseline;gap:7px">
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:.22em;line-height:1;color:var(--text)">UTAMIX</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:.08em;opacity:.8">v6</span>
+      </div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.06em">歌ってみた同時再生ミキサー</span>
+    </div>
+  </div>
+</div>
+
+<!-- Players area -->
+<div id="players-area">
+  <div id="drop-overlay">
+    <div class="drop-title">🎵 ドロップして追加</div>
+    <div class="drop-sub">YouTube URL をここにドロップ</div>
+  </div>
+  <div id="players-grid">
+    <div id="empty-state">
+      <div style="width:56px;height:56px;border-radius:14px;background:var(--dim);display:flex;align-items:center;justify-content:center;font-size:28px">🎵</div>
+      <div style="text-align:center">
+        <p style="color:rgba(255,255,255,.75);font-size:15px;margin-bottom:8px">YouTube URL をここにドロップして追加</p>
+        <p style="font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.35);font-size:11px">最大6動画まで同時再生可能</p>
+        <p style="font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.22);font-size:10px;margin-top:4px">追加するたびに自動サイズ調整</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mixer -->
+<div id="mixer-shell">
+  <div id="seek-row">
+    <button class="t-btn play" id="play-btn" onclick="togglePlay()">▶ 再生<span style="font-size:9px;color:var(--muted);margin-left:4px">[Space]</span></button>
+    <button class="t-btn" onclick="seekAllTo(0)" style="padding:5px 9px">⏮</button>
+    <div class="seek-wrap">
+      <span class="time-lbl" id="ms-cur">0:00</span>
+      <input type="range" id="ms-range" min="0" max="1000" value="0" oninput="onMSeekInput()" onchange="onMSeekChange()">
+      <span class="time-lbl" id="ms-dur">–:––</span>
+    </div>
+  </div>
+  <div id="fader-row">
+    <div class="strip" id="master-strip">
+      <div class="strip-ch">MASTER</div>
+      <div class="fader-section">
+        <div class="vu-col" id="m-vu-l"></div>
+        <div class="vf-wrap">
+          <div class="vf-val" id="m-vol-val">30</div>
+          <div class="vf-track" id="m-vol-track">
+            <div class="vf-fill"  id="m-vol-fill"  style="height:30%"></div>
+            <div class="vf-thumb" id="m-vol-thumb" style="bottom:calc(30% - 4px)"></div>
+          </div>
+        </div>
+        <div class="vu-col" id="m-vu-r"></div>
+      </div>
+    </div>
+    <div id="ch-scroll"></div>
+  </div>
+</div>
+
+</div><!-- #app -->
+
+
+
+<script>
+// ════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════
+const S = {
+  players:      [],
+  count:        0,
+  masterVol:    30,
+  isPlaying:    false,
+  pausedAt:     0,
+  playStartAt:  0,
+  playStartPos: 0,
+  duration:     0,      // 全動画中の最大再生時間（秒）
+  seekTimer:    null,
+  seekDragging: false,
+  faderDrag:    null,
+  vuTimers:     {},
+  soloTrack:    null,
+};
+
+// ════════════════════════════════════════════════════════
+// Helpers
+// ════════════════════════════════════════════════════════
+function ytCmd(iframe, func, args) {
+  try { iframe.contentWindow.postMessage(JSON.stringify({ event:'command', func, args: args ?? '' }), '*'); } catch(e) {}
+}
+function extractId(url) {
+  for (const re of [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ]) { const m = url.match(re); if (m) return m[1]; }
+  return null;
+}
+function fmt(s) {
+  if (!isFinite(s) || s < 0) s = 0;
+  s = Math.round(s);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function getNow() {
+  if (S.isPlaying) return Math.min(S.playStartPos + (performance.now() - S.playStartAt) / 1000, S.duration || 999);
+  return S.pausedAt;
+}
+
+// ════════════════════════════════════════════════════════
+// YouTube IFrame postMessage プロトコル（正式な方法）
+// ════════════════════════════════════════════════════════
+//
+// 手順:
+//  1. iframe の src に ?enablejsapi=1 を付ける
+//  2. iframe ロード後に {"event":"listening"} を送ると
+//     YouTube 側がこちらを認識し始める
+//  3. {"event":"command","func":"addEventListener","args":["onReady"]} を送る
+//  4. onReady イベントが来たら getDuration / setVolume 等が使える
+//  5. infoDelivery イベントで duration・currentTime が流れてくる
+//
+// file:// で動かすため youtube-nocookie.com を使う。
+// ────────────────────────────────────────────────────────
+
+// postMessage ラッパー
+function ytCmd(iframe, func, args) {
+  try {
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func, args: args ?? '' }), '*'
+    );
+  } catch(e) {}
+}
+
+// iframe を "listening" 状態にして onReady/onStateChange を登録する
+function ytListen(iframe) {
+  try {
+    iframe.contentWindow.postMessage(JSON.stringify({ event: 'listening' }), '*');
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: 'command', func: 'addEventListener', args: ['onReady']
+    }), '*');
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: 'command', func: 'addEventListener', args: ['onStateChange']
+    }), '*');
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: 'command', func: 'addEventListener', args: ['onError']
+    }), '*');
+  } catch(e) {}
+}
+
+// 全 message を受信して処理
+window.addEventListener('message', e => {
+  let data;
+  try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch(_) { return; }
+  if (!data || !data.event) return;
+
+  // どの iframe から来たか特定
+  const p = S.players.find(pl => pl.iframe?.contentWindow === e.source);
+  if (!p) return;
+
+  if (data.event === 'onReady') {
+    // 準備完了 → 音量を設定して duration を問い合わせる
+    ytCmd(p.iframe, 'setVolume', [Math.round((p.vol / 100) * S.masterVol)]);
+    // getDuration は onReady 後なら動く
+    setTimeout(() => requestDuration(p), 300);
+  }
+
+  if (data.event === 'infoDelivery' && data.info) {
+    // duration
+    const dur = data.info.duration;
+    if (dur && dur > 0 && dur !== p.duration) {
+      p.duration = dur;
+      updateMasterDuration();
+    }
+    // currentTime — 再生中の実際の位置（参考）
+    // （将来的にドリフト補正に使える）
+  }
+});
+
+// getDuration コマンドを送る（onReady 後のみ有効）
+function requestDuration(p, attempt = 0) {
+  if (attempt > 30) return;   // 最大15秒リトライ
+  ytCmd(p.iframe, 'getDuration');
+  setTimeout(() => {
+    if (!p.duration || p.duration <= 0) requestDuration(p, attempt + 1);
+  }, 500);
+}
+
+// 全プレイヤーの最大 duration を S.duration に反映
+function updateMasterDuration() {
+  const max = S.players.reduce((m, pl) => Math.max(m, pl.duration || 0), 0);
+  if (max > 0) {
+    S.duration = max;
+    updateSeekUI();
+  }
+}
+
+const EMPTY_HTML = `<div id="empty-state">
+  <div style="width:56px;height:56px;border-radius:14px;background:var(--dim);display:flex;align-items:center;justify-content:center;font-size:28px">🎵</div>
+  <div style="text-align:center">
+    <p style="color:rgba(255,255,255,.75);font-size:15px;margin-bottom:8px">YouTube URL をここにドロップして追加</p>
+    <p style="font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.35);font-size:11px">最大6動画まで同時再生可能</p>
+    <p style="font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.22);font-size:10px;margin-top:4px">追加するたびに自動サイズ調整</p>
+  </div>
+</div>`;
+
+// ════════════════════════════════════════════════════════
+// Layout
+// ════════════════════════════════════════════════════════
+const LAYOUT_MAP = { 1:[1,1], 2:[2,1], 3:[3,1], 4:[2,2], 5:[3,2], 6:[3,2] };
+const GAP = 8, MARGIN = 8;
+function relayout() {
+  const n = S.players.length;
+  if (n === 0) return;
+  const area = document.getElementById('players-area');
+  const grid = document.getElementById('players-grid');
+  const [cols, rows] = LAYOUT_MAP[n] || [3, Math.ceil(n / 3)];
+  const availW = area.clientWidth  - MARGIN * 2 - GAP * (cols - 1);
+  const availH = area.clientHeight - MARGIN * 2 - GAP * (rows - 1);
+  let w = availW / cols, h = w * 9 / 16;
+  if (h > availH / rows) { h = availH / rows; w = h * 16 / 9; }
+  grid.style.gridTemplateColumns = `repeat(${cols}, ${w}px)`;
+  grid.style.gridTemplateRows    = `repeat(${rows}, ${h}px)`;
+  grid.style.gap     = `${GAP}px`;
+  grid.style.padding = `${MARGIN}px`;
+  grid.style.justifyContent = 'center';
+  grid.style.alignContent   = 'center';
+  document.querySelectorAll('.pcard').forEach(c => {
+    c.style.width  = w + 'px';
+    c.style.height = h + 'px';
+  });
+  return { w, h };
+}
+window.addEventListener('resize', relayout);
+
+// ════════════════════════════════════════════════════════
+// Add player
+// ════════════════════════════════════════════════════════
+function addPlayerFromUrl(url) {
+  if (S.players.length >= 6) { alert('最大6動画まで'); return; }
+  const vid = extractId(url);
+  if (!vid) return;
+
+  document.getElementById('empty-state')?.remove();
+  S.count++;
+  const pid = `p${S.count}`;
+  const p = { pid, vid, vol:50, offset:0, muted:false, solo:false, iframe:null, duration:0 };
+  S.players.push(p);
+
+  const src = `https://www.youtube-nocookie.com/embed/${vid}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1`;
+  const card = document.createElement('div');
+  card.className = 'pcard pcard-enter';
+  card.id = `card-${pid}`;
+  card.dataset.pid = pid;
+  card.innerHTML = `
+    <iframe id="iframe-${pid}" src="${src}" allow="autoplay;encrypted-media;picture-in-picture" allowfullscreen></iframe>
+    <div class="ch-badge" id="badge-${pid}">CH ${S.count}</div>
+    <button class="rm-btn" onclick="removePlayer('${pid}')">✕</button>
+  `;
+  document.getElementById('players-grid').appendChild(card);
+  p.iframe = document.getElementById(`iframe-${pid}`);
+
+  // iframe ロード後: listening 登録 → onReady で音量・duration 取得
+  p.iframe.addEventListener('load', () => {
+    // 少し待ってから登録（YouTube の JS が完全に起動するのを待つ）
+    setTimeout(() => ytListen(p.iframe), 500);
+  });
+
+  addStrip(p);
+  requestAnimationFrame(relayout);
+
+  // 再生していなくても duration を取得できるよう、数秒後に再試行
+  setTimeout(() => {
+    if (!p.duration || p.duration <= 0) {
+      ytListen(p.iframe);
+      setTimeout(() => requestDuration(p), 400);
+    }
+  }, 3000);
+}
+
+// ════════════════════════════════════════════════════════
+// URL drop to add
+// ════════════════════════════════════════════════════════
+const playersArea = document.getElementById('players-area');
+const dropOverlay = document.getElementById('drop-overlay');
+
+function isUrlDrop(e) {
+  return Array.from(e.dataTransfer.types).some(t => t === 'text/plain' || t === 'text/uri-list');
+}
+
+playersArea.addEventListener('dragenter', e => { if (isUrlDrop(e)) dropOverlay.classList.add('show'); });
+playersArea.addEventListener('dragleave', e => { if (!playersArea.contains(e.relatedTarget)) dropOverlay.classList.remove('show'); });
+playersArea.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+playersArea.addEventListener('drop',      handleUrlDrop);
+
+function handleUrlDrop(e) {
+  e.preventDefault();
+  dropOverlay.classList.remove('show');
+  const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list') || '';
+  const url  = text.trim().split(/\s+/)[0];
+  if (url && extractId(url)) addPlayerFromUrl(url);
+}
+
+// ════════════════════════════════════════════════════════
+// Channel strip
+// ════════════════════════════════════════════════════════
+function addStrip(p) {
+  const { pid, vol } = p;
+  const strip = document.createElement('div');
+  strip.className = 'strip';
+  strip.id = `strip-${pid}`;
+  strip.innerHTML = `
+    <div class="strip-ch" id="head-${pid}">CH ${S.count}</div>
+    <div class="fader-section">
+      <div class="vu-col" id="vu-l-${pid}"></div>
+      <div class="vf-wrap">
+        <div class="vf-val" id="vol-val-${pid}">${vol}</div>
+        <div class="vf-track" id="vol-track-${pid}">
+          <div class="vf-fill"  id="vol-fill-${pid}"  style="height:${vol}%"></div>
+          <div class="vf-thumb" id="vol-thumb-${pid}" style="bottom:calc(${vol}% - 4px)"></div>
+        </div>
+      </div>
+      <div class="vu-col" id="vu-r-${pid}"></div>
+    </div>
+    <div class="strip-btns">
+      <button class="s-btn" id="solo-btn-${pid}" onclick="toggleSolo('${pid}')">SOLO</button>
+      <button class="s-btn" id="mute-btn-${pid}" onclick="toggleMute('${pid}')">MUTE</button>
+    </div>
+    <div class="off-row">
+      <button class="off-adj" onclick="adjOffset('${pid}',-500)">◀◀</button>
+      <button class="off-adj" onclick="adjOffset('${pid}',-50)">◀</button>
+      <div class="off-val" id="offset-disp-${pid}">0ms</div>
+      <button class="off-adj" onclick="adjOffset('${pid}',+50)">▶</button>
+      <button class="off-adj" onclick="adjOffset('${pid}',+500)">▶▶</button>
+    </div>
+    <div class="pos-disp" id="pos-${pid}">0:00</div>
+  `;
+  document.getElementById('ch-scroll').appendChild(strip);
+  buildVU(`vu-l-${pid}`); buildVU(`vu-r-${pid}`);
+  buildVU('m-vu-l'); buildVU('m-vu-r');
+  document.getElementById(`vol-track-${pid}`).addEventListener('mousedown',  e => startFaderDrag(e, pid));
+  document.getElementById(`vol-track-${pid}`).addEventListener('touchstart', e => startFaderDrag(e, pid), { passive:false });
+}
+
+function buildVU(id) {
+  const col = document.getElementById(id);
+  if (!col || col.children.length) return;
+  for (let i = 0; i < 12; i++) {
+    const s = document.createElement('div');
+    s.className = 'vu-seg';
+    s.style.background = i < 2 ? 'var(--red)' : i < 5 ? 'var(--accent)' : 'rgba(255,255,255,.2)';
+    s.style.opacity = '0.12';
+    col.appendChild(s);
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// Remove / Clear
+// ════════════════════════════════════════════════════════
+function removePlayer(pid) {
+  stopVU(pid);
+  document.getElementById(`card-${pid}`)?.remove();
+  document.getElementById(`strip-${pid}`)?.remove();
+  const i = S.players.findIndex(x => x.pid === pid);
+  if (i !== -1) S.players.splice(i, 1);
+  if (S.soloTrack === pid) { S.soloTrack = null; applyMuteState(); }
+  if (!S.players.length) document.getElementById('players-grid').innerHTML = EMPTY_HTML;
+  updateMasterDuration();
+  S.players.forEach((p, idx) => {
+    document.getElementById(`badge-${p.pid}`)?.setAttribute('data-txt', `CH ${idx+1}`);
+    const b = document.getElementById(`badge-${p.pid}`); if (b) b.textContent = `CH ${idx+1}`;
+    const h = document.getElementById(`head-${p.pid}`);  if (h) h.textContent  = `CH ${idx+1}`;
+  });
+  requestAnimationFrame(relayout);
+}
+function clearAll() {
+  S.players.forEach(p => stopVU(p.pid));
+  S.players.length = 0; S.count = 0; S.soloTrack = null;
+  document.getElementById('players-grid').innerHTML = EMPTY_HTML;
+  document.getElementById('ch-scroll').innerHTML = '';
+  pauseAll(); S.isPlaying = false; updatePlayBtn();
+}
+
+// ════════════════════════════════════════════════════════
+// Playback
+// ════════════════════════════════════════════════════════
+function togglePlay() { S.isPlaying ? pauseAll() : playAll(); }
+function playAll() {
+  const pos = S.pausedAt;
+  applyMuteState();
+  S.players.forEach(p => ytCmd(p.iframe, 'seekTo', [Math.max(0, pos + p.offset / 1000), true]));
+  setTimeout(() => {
+    S.players.forEach(p => ytCmd(p.iframe, 'playVideo'));
+    S.playStartAt = performance.now(); S.playStartPos = pos;
+    S.isPlaying = true; updatePlayBtn(); startUITimer();
+    S.players.forEach(p => startVU(p.pid));
+  }, 180);
+}
+function pauseAll() {
+  S.pausedAt = getNow();
+  S.players.forEach(p => { ytCmd(p.iframe, 'pauseVideo'); stopVU(p.pid); });
+  S.isPlaying = false; updatePlayBtn(); clearInterval(S.seekTimer); updateSeekUI();
+}
+function updatePlayBtn() {
+  const b = document.getElementById('play-btn');
+  b.innerHTML = (S.isPlaying ? '⏸ 停止' : '▶ 再生') + '<span style="font-size:9px;color:var(--muted);margin-left:4px">[Space]</span>';
+  b.className = 't-btn play' + (S.isPlaying ? ' playing' : '');
+}
+
+// ════════════════════════════════════════════════════════
+// Seek
+// ════════════════════════════════════════════════════════
+function onMSeekInput() {
+  S.pausedAt = (document.getElementById('ms-range').value / 1000) * S.duration;
+  updateSeekUI();
+}
+function onMSeekChange() { seekAllTo((document.getElementById('ms-range').value / 1000) * S.duration); }
+function seekAllTo(sec) {
+  sec = Math.max(0, Math.min(sec, S.duration));
+  S.pausedAt = sec; S.playStartPos = sec; S.playStartAt = performance.now();
+  S.players.forEach(p => ytCmd(p.iframe, 'seekTo', [Math.max(0, sec + p.offset / 1000), true]));
+  updateSeekUI();
+}
+function updateSeekUI() {
+  const t = getNow(), d = S.duration;
+  document.getElementById('ms-cur').textContent = fmt(t);
+  document.getElementById('ms-dur').textContent = d > 0 ? fmt(d) : '–:––';
+  if (!S.seekDragging) document.getElementById('ms-range').value = d > 0 ? (t / d) * 1000 : 0;
+}
+const msRange = document.getElementById('ms-range');
+msRange.addEventListener('mousedown', () => S.seekDragging = true);
+msRange.addEventListener('touchstart', () => S.seekDragging = true, { passive:true });
+msRange.addEventListener('mouseup',  () => S.seekDragging = false);
+msRange.addEventListener('touchend', () => S.seekDragging = false);
+function startUITimer() {
+  clearInterval(S.seekTimer);
+  let tick = 0;
+  S.seekTimer = setInterval(() => {
+    if (S.isPlaying) updateSeekUI();
+    tick++;
+    // 3秒ごと: duration 未取得のプレイヤーに再度 listen + getDuration を送る
+    if (tick % 12 === 0) {
+      S.players.forEach(pl => {
+        if (!pl.duration || pl.duration <= 0) {
+          ytListen(pl.iframe);
+          setTimeout(() => requestDuration(pl), 400);
+        }
+      });
+    }
+  }, 250);
+}
+
+// ════════════════════════════════════════════════════════
+// Offset
+// ════════════════════════════════════════════════════════
+function adjOffset(pid, deltaMs) {
+  const p = S.players.find(x => x.pid === pid);
+  if (!p) return;
+  p.offset += deltaMs;
+  ytCmd(p.iframe, 'seekTo', [Math.max(0, getNow() + p.offset / 1000), true]);
+  updateOffsetDisplay(pid);
+}
+function updateOffsetDisplay(pid) {
+  const p = S.players.find(x => x.pid === pid);
+  const el = document.getElementById(`offset-disp-${pid}`);
+  if (!el || !p) return;
+  el.textContent = (p.offset > 0 ? '+' : '') + p.offset + 'ms';
+  el.style.color = p.offset === 0 ? 'var(--muted)' : p.offset < 0 ? 'var(--accent)' : 'var(--accent2)';
+}
+function resetAllOffsets() {
+  S.players.forEach(p => { p.offset = 0; updateOffsetDisplay(p.pid); });
+  seekAllTo(getNow());
+}
+
+// ════════════════════════════════════════════════════════
+// Solo / Mute
+// ════════════════════════════════════════════════════════
+function toggleSolo(pid) {
+  if (S.soloTrack === pid) {
+    S.soloTrack = null;
+    const p = S.players.find(x => x.pid === pid);
+    if (p) p.solo = false;
+    document.getElementById(`solo-btn-${pid}`).className = 's-btn';
+  } else {
+    if (S.soloTrack) {
+      const prev = S.players.find(x => x.pid === S.soloTrack);
+      if (prev) prev.solo = false;
+      const prevBtn = document.getElementById(`solo-btn-${S.soloTrack}`);
+      if (prevBtn) prevBtn.className = 's-btn';
+    }
+    S.soloTrack = pid;
+    const p = S.players.find(x => x.pid === pid);
+    if (p) p.solo = true;
+    document.getElementById(`solo-btn-${pid}`).className = 's-btn solo-on';
+  }
+  applyMuteState();
+}
+function toggleMute(pid) {
+  const p = S.players.find(x => x.pid === pid);
+  if (!p) return;
+  p.muted = !p.muted;
+  document.getElementById(`mute-btn-${pid}`).className = 's-btn' + (p.muted ? ' mute-on' : '');
+  applyMuteState();
+}
+function applyMuteState() {
+  S.players.forEach(p => {
+    const silenced = p.muted || (S.soloTrack !== null && S.soloTrack !== p.pid);
+    ytCmd(p.iframe, 'setVolume', [silenced ? 0 : Math.round((p.vol / 100) * S.masterVol)]);
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// Fader drag (volume)
+// ════════════════════════════════════════════════════════
+function startFaderDrag(e, pid) { e.preventDefault(); S.faderDrag = { pid }; }
+document.getElementById('m-vol-track').addEventListener('mousedown',  e => { e.preventDefault(); S.faderDrag = { pid:'master' }; });
+document.getElementById('m-vol-track').addEventListener('touchstart', e => { e.preventDefault(); S.faderDrag = { pid:'master' }; }, { passive:false });
+document.addEventListener('mousemove', e => {
+  if (!S.faderDrag) return;
+  e.preventDefault();
+  const cy  = e.touches ? e.touches[0].clientY : e.clientY;
+  const pid  = S.faderDrag.pid;
+  const tid  = pid === 'master' ? 'm-vol-track' : `vol-track-${pid}`;
+  const rect = document.getElementById(tid).getBoundingClientRect();
+  const pct  = Math.round(Math.max(0, Math.min(100, 100 - ((cy - rect.top) / rect.height) * 100)));
+  applyVol(pid, pct);
+});
+document.addEventListener('touchmove', e => {
+  if (!S.faderDrag) return;
+  e.preventDefault();
+  const cy  = e.touches[0].clientY;
+  const pid  = S.faderDrag.pid;
+  const tid  = pid === 'master' ? 'm-vol-track' : `vol-track-${pid}`;
+  const rect = document.getElementById(tid).getBoundingClientRect();
+  const pct  = Math.round(Math.max(0, Math.min(100, 100 - ((cy - rect.top) / rect.height) * 100)));
+  applyVol(pid, pct);
+}, { passive:false });
+document.addEventListener('mouseup',  () => S.faderDrag = null);
+document.addEventListener('touchend', () => S.faderDrag = null);
+
+function applyVol(pid, pct) {
+  if (pid === 'master') {
+    S.masterVol = pct;
+    document.getElementById('m-vol-fill').style.height  = pct + '%';
+    document.getElementById('m-vol-thumb').style.bottom = `calc(${pct}% - 4px)`;
+    document.getElementById('m-vol-val').textContent    = pct;
+    applyMuteState();
+  } else {
+    const p = S.players.find(x => x.pid === pid);
+    if (!p) return;
+    p.vol = pct;
+    document.getElementById(`vol-fill-${pid}`).style.height  = pct + '%';
+    document.getElementById(`vol-thumb-${pid}`).style.bottom = `calc(${pct}% - 4px)`;
+    document.getElementById(`vol-val-${pid}`).textContent    = pct;
+    applyMuteState();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// VU meter
+// ════════════════════════════════════════════════════════
+function startVU(pid) {
+  if (S.vuTimers[pid]) return;
+  S.vuTimers[pid] = setInterval(() => {
+    const level = 2 + Math.random() * 9;
+    ['vu-l','vu-r'].forEach(s =>
+      document.getElementById(`${s}-${pid}`)?.querySelectorAll('.vu-seg').forEach((seg, i) =>
+        seg.style.opacity = (11-i) < level ? '1' : '0.12'));
+    const mLvl = 4 + Math.random() * 7;
+    ['m-vu-l','m-vu-r'].forEach(id =>
+      document.getElementById(id)?.querySelectorAll('.vu-seg').forEach((seg, i) =>
+        seg.style.opacity = (11-i) < mLvl ? '1' : '0.12'));
+  }, 80);
+}
+function stopVU(pid) {
+  clearInterval(S.vuTimers[pid]); delete S.vuTimers[pid];
+  ['vu-l','vu-r'].forEach(s =>
+    document.getElementById(`${s}-${pid}`)?.querySelectorAll('.vu-seg').forEach(x => x.style.opacity = '0.12'));
+}
+
+// ════════════════════════════════════════════════════════
+// Position display
+// ════════════════════════════════════════════════════════
+setInterval(() => {
+  S.players.forEach(p => {
+    const el = document.getElementById(`pos-${p.pid}`);
+    if (el) el.textContent = fmt(Math.max(0, getNow() + p.offset / 1000));
+  });
+}, 500);
+
+// ════════════════════════════════════════════════════════
+// Keyboard
+// ════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+});
+</script>
+</body>
+</html>
